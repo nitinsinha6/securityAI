@@ -1,0 +1,157 @@
+name: e2e-tests-and-allure
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # If you host your AUT elsewhere, set BASE_URL as a repo secret
+      BASE_URL: ${{ secrets.BASE_URL }}
+
+      # qTest (optional)
+      QTEST_BASE_URL: ${{ secrets.QTEST_BASE_URL }}
+      QTEST_PROJECT_ID: ${{ secrets.QTEST_PROJECT_ID }}
+      QTEST_TOKEN: ${{ secrets.QTEST_TOKEN }}
+      QTEST_RELEASE_ID: ${{ secrets.QTEST_RELEASE_ID }}
+      QTEST_TEST_CYCLE_ID: ${{ secrets.QTEST_TEST_CYCLE_ID }}
+      QTEST_TEST_SUITE_ID: ${{ secrets.QTEST_TEST_SUITE_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      # --- Install dependencies for your test project ---
+      - name: Install test dependencies
+        working-directory: ./selenium-pytest-bdd-allure-qtest-ci
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # optional parallel:
+          pip install pytest-xdist
+
+      # --- Option A: Start your Flask app from repo root (if you want to run locally in CI) ---
+      # This step is skipped if you set BASE_URL secret to point to an existing env.
+      - name: Start local Flask app (optional)
+        if: env.BASE_URL == ''
+        run: |
+          set -e
+          echo "[CI] No BASE_URL provided. Trying to start a local Flask app on 127.0.0.1:5010"
+          # If your app has a requirements.txt at repo root, install it:
+          if [ -f "requirements.txt" ]; then
+            python -m pip install -r requirements.txt || true
+          fi
+
+          # (Adjust this command to how you start your app.)
+          # Common patterns:
+          #   python -m app.app
+          #   flask --app app/app.py run --host 127.0.0.1 --port 5010
+          # If you're using the rbc-security-insights-ai app, uncomment the block below
+          if [ -d "rbc-security-insights-ai" ]; then
+            echo "[CI] Detected rbc-security-insights-ai; preparing data and starting..."
+            pushd rbc-security-insights-ai
+            python -m pip install -r requirements.txt
+            python -m core.synth --days 2 --users 60 --out data/events.csv
+            python -m pipelines.train --in data/events.csv --model_dir models
+            python -m pipelines.score --in data/events.csv --model_dir models --out data/insights.csv
+            nohup python -m app.app > rbc_app.log 2>&1 &
+            popd
+          elif [ -f "app/app.py" ]; then
+            echo "[CI] Found app/app.py at repo root; starting it..."
+            nohup python -m app.app > app.log 2>&1 &
+          else
+            echo "[CI] No app found to auto-start. Tests may skip if not reachable."
+          fi
+
+          # Wait for /health for up to 60s
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:5010/health && break || true
+            sleep 1
+          done
+
+      - name: Run tests (parallel) and collect Allure results
+        working-directory: ./selenium-pytest-bdd-allure-qtest-ci
+        run: |
+          mkdir -p reports/allure-results
+          BASE="${BASE_URL:-http://127.0.0.1:5010}"
+          echo "Using BASE_URL=$BASE"
+          pytest -n auto --base-url "$BASE" || true
+
+      - name: Upload raw Allure results
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: selenium-pytest-bdd-allure-qtest-ci/reports/allure-results
+
+      - name: Install Allure CLI
+        run: |
+          ALLURE_VER=2.27.0
+          curl -sL -o allure.tgz https://github.com/allure-framework/allure2/releases/download/${ALLURE_VER}/allure-${ALLURE_VER}.tgz
+          tar -xzf allure.tgz
+          echo "$PWD/allure-${ALLURE_VER}/bin" >> $GITHUB_PATH
+
+      - name: Generate Allure HTML
+        working-directory: ./selenium-pytest-bdd-allure-qtest-ci
+        run: |
+          allure generate reports/allure-results -o allure-report --clean || echo "Allure generation failed"
+
+      - name: Install wkhtmltopdf (for PDF)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wkhtmltopdf
+
+      - name: Export Allure → PDF (best effort)
+        working-directory: ./selenium-pytest-bdd-allure-qtest-ci
+        run: |
+          if [ -f allure-report/index.html ]; then
+            wkhtmltopdf --disable-smart-shrinking allure-report/index.html allure-report.pdf || echo "wkhtmltopdf failed"
+          fi
+
+      - name: Upload Allure HTML + PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: |
+            selenium-pytest-bdd-allure-qtest-ci/allure-report
+            selenium-pytest-bdd-allure-qtest-ci/allure-report.pdf
+
+      - name: Push results to qTest (optional)
+        if: env.QTEST_BASE_URL != '' && env.QTEST_PROJECT_ID != '' && env.QTEST_TOKEN != ''
+        working-directory: ./selenium-pytest-bdd-allure-qtest-ci
+        run: |
+          python qtest_integration/qtest_push.py reports/allure-results || echo "qTest push failed"
+
+  # OPTIONAL: publish Allure HTML to GitHub Pages on main/master
+  pages:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Allure report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-report
+          path: ./_site
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
