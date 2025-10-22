@@ -1,0 +1,108 @@
+name: tests-and-allure
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: http://127.0.0.1:5010
+      QTEST_BASE_URL: ${{ secrets.QTEST_BASE_URL }}
+      QTEST_PROJECT_ID: ${{ secrets.QTEST_PROJECT_ID }}
+      QTEST_TOKEN: ${{ secrets.QTEST_TOKEN }}
+      QTEST_RELEASE_ID: ${{ secrets.QTEST_RELEASE_ID }}
+      QTEST_TEST_CYCLE_ID: ${{ secrets.QTEST_TEST_CYCLE_ID }}
+      QTEST_TEST_SUITE_ID: ${{ secrets.QTEST_TEST_SUITE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Try to start local RBC app (optional)
+        run: |
+          bash tools/start_rbc_app_ci.sh || true
+
+      - name: Run tests (parallel) and save Allure results
+        run: |
+          mkdir -p reports/allure-results
+          pytest -n auto --base-url "${BASE_URL}" || true
+
+      - name: Upload raw Allure results
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: reports/allure-results
+
+      - name: Install Allure CLI
+        run: |
+          ALLURE_VER=2.27.0
+          curl -sL -o allure.tgz https://github.com/allure-framework/allure2/releases/download/${ALLURE_VER}/allure-${ALLURE_VER}.tgz
+          tar -xzf allure.tgz
+          echo "$PWD/allure-${ALLURE_VER}/bin" >> $GITHUB_PATH
+
+      - name: Generate Allure HTML
+        run: |
+          allure generate reports/allure-results -o allure-report --clean || echo "Allure generation failed"
+
+      - name: Install wkhtmltopdf (for PDF)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wkhtmltopdf
+
+      - name: Export PDF from Allure HTML (best-effort)
+        run: |
+          if [ -f allure-report/index.html ]; then
+            wkhtmltopdf --disable-smart-shrinking allure-report/index.html allure-report.pdf || echo "wkhtmltopdf failed"
+          fi
+
+      - name: Upload Allure HTML + PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: |
+            allure-report
+            allure-report.pdf
+
+      - name: Push results to qTest (optional)
+        if: env.QTEST_BASE_URL != '' && env.QTEST_PROJECT_ID != '' && env.QTEST_TOKEN != ''
+        run: |
+          python qtest_integration/qtest_push.py reports/allure-results || echo "qTest push failed"
+
+  # Optional: publish Allure HTML to GitHub Pages
+  pages:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Allure report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-report
+          path: ./_site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

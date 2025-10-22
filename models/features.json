@@ -1,0 +1,1 @@
+["hour", "dayofweek", "off_hours", "amount", "amount_roll_mean_7d", "amount_roll_std_7d", "login_cnt_24h", "geo_km_from_prev", "event_type_code", "country_code", "channel_code", "role_code", "is_privileged", "mfa_success"]

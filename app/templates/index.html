@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RBC WM — Security Insights (AI)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+    .muted { color: #666; }
+    .row { display:flex; gap:1rem; flex-wrap:wrap; }
+    .card { border:1px solid #eee; border-radius:12px; padding:1rem; box-shadow:0 2px 6px rgba(0,0,0,.06); }
+    .kpi { min-width: 160px; }
+    .kpi .v { font-size: 1.7rem; font-weight: 700; }
+    .pill { padding: 4px 10px; border-radius: 999px; background: #f2f2f2; }
+    img { max-width: 100%; border: 1px solid #eee; border-radius: 8px; }
+    table { width:100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; }
+    .sev-high { color: #b00020; font-weight: 700; }
+    .sev-medium { color: #b36b00; font-weight: 600; }
+    .sev-low { color: #2e7d32; font-weight: 600; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+    .selector { margin: 0 0 1rem 0; }
+    select { padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; }
+    button { padding: 6px 12px; border-radius: 8px; border: 1px solid #ddd; background: #fafafa; cursor:pointer; }
+  </style>
+</head>
+<body>
+<div class="main">
+  <header class="header"><div class="header-inner"><div class="brand">
+    <img src="{{ logo_url }}" alt="{{ brand_name }} logo" style="height:48px; width:auto; border-radius:6px; border:1px solid #eee; background:#fff;" />
+    <div>
+      <h1 style="margin:0;">{{ brand_name }} — Security Insights (AI)</h1>
+      <div class="muted">Synthetic demo for dashboards & anomaly detection</div>    </div><nav class="nav"><a href="#">Solutions</a><a href="#">Insights</a><a href="#">Find an advisor</a><a href="#">About</a></nav></div><div class="header-accent"></div></header>
+  </div>
+
+  
+  <p class="muted">Choose a stakeholder view to tailor charts and the table below.</p>
+
+  <form class="selector" method="GET">
+    <label for="view">Stakeholder view:</label>
+    <select name="view" id="view" onchange="this.form.submit()">
+      <option value="soc" {{ 'selected' if view=='soc' else '' }}>SOC Analyst</option>
+      <option value="exec" {{ 'selected' if view=='exec' else '' }}>Executive / CISO</option>
+      <option value="compliance" {{ 'selected' if view=='compliance' else '' }}>Compliance</option>
+      <option value="advisor" {{ 'selected' if view=='advisor' else '' }}>Advisor / Branch</option>
+    </select>
+    <noscript><button type="submit">Apply</button></noscript>
+  </form>
+
+  <div class="row">
+    <div class="card kpi"><div class="muted">Total events</div><div class="v">{{ kpis.total }}</div></div>
+    <div class="card kpi"><div class="muted">Avg risk</div><div class="v">{{ '%.3f'|format(kpis.avg) }}</div></div>
+    <div class="card kpi"><div class="muted">High</div><div class="v">{{ kpis.high }}</div></div>
+    <div class="card kpi"><div class="muted">Medium</div><div class="v">{{ kpis.medium }}</div></div>
+    <div class="card kpi"><div class="muted">Low</div><div class="v">{{ kpis.low }}</div></div>
+  </div>
+
+  <div class="grid" style="margin-top:1rem;">
+    {% for src, title in charts %}
+    <div class="card">
+      <div class="muted">{{ title }}</div>
+      <img src="{{ src }}" alt="{{ title }}">
+    </div>
+    {% endfor %}
+  </div>
+
+  <h3 style="margin-top:1.5rem;">Top events</h3>
+  <table aria-label="top-insights">
+    <thead>
+      <tr>
+        <th>Time</th><th>User</th><th>Event</th><th>Country</th><th>Amount</th><th>Risk</th><th>Severity</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in items %}
+      <tr>
+        <td>{{ r.timestamp }}</td>
+        <td><span class="pill">{{ r.user_id }}</span></td>
+        <td>{{ r.event_type }}</td>
+        <td>{{ r.country }}</td>
+        <td>{{ "%.2f"|format((r.amount or 0)|float) }}</td>
+        <td>{{ "%.2f"|format((r.risk_score or 0)|float) }}</td>
+        {% set sev_class = "sev-" + (r.sev|default("low")) %}
+        <td class="{{ sev_class }}">{{ r.sev }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<footer class="footer"><div class="footer-inner"><div class="footer-top"><div class="badges"><span class="badge">Member NYSE</span><span class="badge">FINRA</span><span class="badge">SIPC</span></div><div class="links"><a href="#">Privacy</a> · <a href="#">Legal & Disclosures</a> · <a href="#">Terms & Conditions</a> · <a href="#">Accessibility</a></div></div><div class="legal">© 2025 RBC Wealth Management (demo). For training only; synthetic data, not affiliated with RBC.</div></div></footer>
+</body>
+</html>
